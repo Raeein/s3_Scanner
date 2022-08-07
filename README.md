@@ -1,6 +1,6 @@
 <p align="center">
    
-Sandy Castle combines the best feature of Sandcastle and CloudEnum and sprinkles some new functionlity on top of them. 
+Sandycastle combines the best feature of Sandcastle and CloudEnum and sprinkles some new functionlity on top of them. 
 
 The script takes a target's name (e.g. `reddit`) and iterates through a file of bucket name permutations, such as the ones below:
 

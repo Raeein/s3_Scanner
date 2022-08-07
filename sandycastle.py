@@ -67,14 +67,16 @@ def proccess_file():
 def create_mutations(words, target):
     all_mutations = []
     for word in words:
-        all_mutations.append(f"http://{target}-{word}.s3.amazonaws.com")
-        all_mutations.append(f"http://{target}.{word}.s3.amazonaws.com")
-        all_mutations.append(f"http://{word}-{target}.s3.amazonaws.com")
-        all_mutations.append(f"http://{word}.{target}.s3.amazonaws.com")
-        all_mutations.append(f"http://s3.amazonaws.com/{target}-{word}/")
-        all_mutations.append(f"http://s3.amazonaws.com/{target}.{word}/")
-        all_mutations.append(f"http://s3.amazonaws.com/{word}-{target}/")
-        all_mutations.append(f"http://s3.amazonaws.com/{word}.{target}/")
+        all_mutations.extend([
+            f"http://{target}-{word}.s3.amazonaws.com",
+            f"http://{target}.{word}.s3.amazonaws.com",
+            f"http://{word}-{target}.s3.amazonaws.com",
+            f"http://{word}.{target}.s3.amazonaws.com",
+            f"http://s3.amazonaws.com/{target}-{word}/",
+            f"http://s3.amazonaws.com/{target}.{word}/",
+            f"http://s3.amazonaws.com/{word}-{target}/",
+            f"http://s3.amazonaws.com/{word}.{target}/"
+        ])
     return all_mutations
 
 def fmt_output(data):
