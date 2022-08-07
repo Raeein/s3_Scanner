@@ -14,17 +14,15 @@ except ImportError:
 
 
 class Custom_colors:
-    HEADER = '\033[95m' #Light Pink
+    HEADER = '\033[95m' #Light Pink-Puprle?
     GREEN = '\033[92m'
     ORANGE = '\033[33m'
     BLUE = '\033[94m'
     OKCYAN = '\033[96m'
     RED = '\033[31m'
     WARNING = '\033[93m'
-    FAIL = '\033[91m'
     ENDC = '\033[0m'
     BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
 
 
 parser = ArgumentParser()
@@ -81,20 +79,18 @@ def create_mutations(words, target):
 
 def fmt_output(data):
  
-    bold = '\033[1m'
-    end = '\033[0m'
     if data['access'] == 'public':
-        ansi = bold + Custom_colors.GREEN
+        ansi = Custom_colors.BOLD + Custom_colors.GREEN
     elif data['access'] == 'protected':
-        ansi = bold + Custom_colors.ORANGE
+        ansi = Custom_colors.BOLD + Custom_colors.ORANGE
     elif data['access'] == 'disabled':
-        ansi = bold + Custom_colors.RED
+        ansi = Custom_colors.BOLD + Custom_colors.RED
     elif data['access'] == 'moved':
-        ansi = bold + Custom_colors.BLUE
+        ansi = Custom_colors.BOLD + Custom_colors.BLUE
     else:
-        ansi = bold + Custom_colors.RED
+        ansi = Custom_colors.BOLD + Custom_colors.RED
 
-    sys.stdout.write('  ' + ansi + data['msg'] + ': ' + data['target'] + end + '\n')
+    sys.stdout.write('  ' + ansi + data['msg'] + ': ' + data['target'] + Custom_colors.ENDC + '\n')
     output_file = args.output
 
     if output_file == "default.txt":
@@ -118,12 +114,12 @@ def print_s3_response(reply):
         data['target'] = reply.url
         data['access'] = 'public'
         fmt_output(data)
-    elif reply.status_code == 403:
+    elif reply.status_code == 403 and args.public:
         data['msg'] = 'Protected S3 Bucket'
         data['target'] = reply.url
         data['access'] = 'protected'
         fmt_output(data)
-    elif reply.status_code == 301:
+    elif reply.status_code == 301 and args.public:
         data['msg'] = 'Moved Permanently'
         data['target'] = reply.url
         data['access'] = 'moved'
@@ -157,7 +153,7 @@ def get_urls(all_mutations, threads=5, callback=''):
         for url in batch_pending:
             try:
                 if args.verbose:
-                    print(Custom_colors.OKCYAN,f"Checking {url}")
+                    print(Custom_colors.OKCYAN,f"Checking: {url}")
                 batch_results[url] = batch_pending[url].result(timeout=30)
             except requests.exceptions.ConnectionError as error_msg:
                 if args.silent:
@@ -188,7 +184,7 @@ def check_s3_buckets(all_mutations, threads):
 
     if args.silent:
         wordlist_length = len(all_mutations)
-        print(Custom_colors.WARNING,f"[*] Starting Enumeration | Target: {args.target} | Words loaded: {wordlist_length} | Threads: {args.threads}\n\n")
+        print(Custom_colors.WARNING,f"[*] Starting Enumeration | Target: {args.target} | Total mutations: {wordlist_length} | Threads: {args.threads}\n\n")
     start_time = start_timer()
 
     get_urls(all_mutations,
