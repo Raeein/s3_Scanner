@@ -3,14 +3,23 @@
 import sys
 import requests
 import time
-import json
 from argparse import ArgumentParser
+try:
+    from concurrent.futures import ThreadPoolExecutor
+    from requests_futures.sessions import FuturesSession
+    from concurrent.futures._base import TimeoutError
+except ImportError:
+    print("[!] Please pip install requirements.txt.")
+    sys.exit()
 
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
+
+class Custom_colors:
+    HEADER = '\033[95m' #Light Pink
+    GREEN = '\033[92m'
+    ORANGE = '\033[33m'
+    BLUE = '\033[94m'
     OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
+    RED = '\033[31m'
     WARNING = '\033[93m'
     FAIL = '\033[91m'
     ENDC = '\033[0m'
@@ -23,6 +32,10 @@ parser.add_argument("-t", "--target",
                     help="Select a target stem name (e.g. 'shopify')", required="True")
 parser.add_argument("-f", "--file",
                     help="Select the wordlist file to use (default: bucket-names.txt)", default="bucket-names.txt")
+parser.add_argument("-o", "--output",
+                    help="Select output file to use (default: output_\'target\'.txt)", default="default.txt")
+parser.add_argument("-th", "--threads",
+                    help="Number of threads (default: 5)", default=5, type=int)
 parser.add_argument("-v", "--verbose", action='store_true',
                     help="Prints out everything - use this flag for debugging preferably",)
 parser.add_argument("-s", "--silent", action='store_false',
@@ -32,12 +45,14 @@ parser.add_argument("-oP", "--public", action='store_false',
 args = parser.parse_args()
 
 if args.silent:
-    print(bcolors.HEADER, """
-    ____             __             __  __   
-    / __/__ ____  ___/ /______ ____ / /_/ /__ 
-    _\ \/ _ `/ _ \/ _  / __/ _ `(_-</ __/ / -_)
-    /___/\_,_/_//_/\_,_/\__/\_,_/___/\__/_/\__/ 
-                                                
+    print(Custom_colors.HEADER, """
+   _____                 __         ______           __  __        ___    ____ 
+  / ___/____ _____  ____/ /_  __   / ____/___ ______/ /_/ /__     |__ \  / __ \\
+  \__ \/ __ `/ __ \/ __  / / / /  / /   / __ `/ ___/ __/ / _ \    __/ / / / / /
+ ___/ / /_/ / / / / /_/ / /_/ /  / /___/ /_/ (__  ) /_/ /  __/   / __/_/ /_/ / 
+/____/\__,_/_/ /_/\__,_/\__, /   \____/\__,_/____/\__/_/\___/   /____(_)____/  
+                       /____/                                                  
+
     S3 bucket enumeration // release v2.0.0
 
     """)
@@ -46,11 +61,10 @@ if args.silent:
 def proccess_file():
     with open(args.file, 'r') as file:
         words = file.read().splitlines()
-        lineCount = len(words)
-    if lineCount == 0:
+    if len(words) == 0:
         print("Empty text file, Exiting...")
         sys.exit()
-    return words, lineCount
+    return words
 
 def create_mutations(words, target):
     all_mutations = []
@@ -65,53 +79,124 @@ def create_mutations(words, target):
         all_mutations.append(f"http://s3.amazonaws.com/{word}.{target}/")
     return all_mutations
 
-
-def print_output(url, status_code, public):
-    combined = []
-    combined.extend([url, status_code])
-    if public:
-        print(bcolors.OKGREEN, "{: <75} {: <75}".format(*combined), end="\n")
+def fmt_output(data):
+ 
+    bold = '\033[1m'
+    end = '\033[0m'
+    if data['access'] == 'public':
+        ansi = bold + Custom_colors.GREEN
+    elif data['access'] == 'protected':
+        ansi = bold + Custom_colors.ORANGE
+    elif data['access'] == 'disabled':
+        ansi = bold + Custom_colors.RED
+    elif data['access'] == 'moved':
+        ansi = bold + Custom_colors.BLUE
     else:
-        print(bcolors.WARNING, "{: <75} {: <75}".format(*combined), end="\n")
+        ansi = bold + Custom_colors.RED
+
+    sys.stdout.write('  ' + ansi + data['msg'] + ': ' + data['target'] + end + '\n')
+    output_file = args.output
+
+    if output_file == "default.txt":
+        target = args.target.replace("/", "_")
+        output_file = f"output_{target}.txt"
+
+    with open(output_file, 'a', encoding='utf-8') as log_writer:
+        log_writer.write(f'{data["msg"]}: {data["target"]}\n')
 
 
-def check_for_buckets(all_mutations):
+def print_s3_response(reply):
+ 
+    data = {'platform': 'aws', 'msg': '', 'target': '', 'access': ''}
 
+    if reply.status_code == 404:
+        pass
+    elif 'Bad Request' in reply.reason:
+        pass
+    elif reply.status_code == 200:
+        data['msg'] = 'OPEN S3 BUCKET'
+        data['target'] = reply.url
+        data['access'] = 'public'
+        fmt_output(data)
+    elif reply.status_code == 403:
+        data['msg'] = 'Protected S3 Bucket'
+        data['target'] = reply.url
+        data['access'] = 'protected'
+        fmt_output(data)
+    elif reply.status_code == 301:
+        data['msg'] = 'Moved Permanently'
+        data['target'] = reply.url
+        data['access'] = 'moved'
+        fmt_output(data)
+    elif 'Slow Down' in reply.reason:
+        print("[!] You've been rate limited, skipping rest of the check!")
+        return 'breakout'
+    else:
+        print(f" Unknown status codes being received from {reply.url}:\n"
+              f"       {reply.status_code}: {reply.reason}")
+
+    return None
+
+
+def get_urls(all_mutations, threads=5, callback=''):
+    tick = {}
+    tick['total'] = len(all_mutations)
+    tick['current'] = 0
     buckets_found = {}
+    queue = [all_mutations[x:x+threads] for x in range(0, len(all_mutations), threads)]
 
-    for mutation in all_mutations:
-        if args.verbose:
-            print(bcolors.OKCYAN,f"Checking {mutation}")
-        try:
-            reply = requests.head(mutation)
-        except (requests.exceptions.ConnectionError, KeyboardInterrupt) as e:
-            if (e.__class__.__name__) == "KeyboardInterrupt":
+
+    for batch in queue:
+        session = FuturesSession(executor=ThreadPoolExecutor(max_workers=threads+5))
+        batch_pending = {}
+        batch_results = {}
+
+        for url in batch:
+            batch_pending[url] = session.get(url, allow_redirects=True)
+
+        for url in batch_pending:
+            try:
+                if args.verbose:
+                    print(Custom_colors.OKCYAN,f"Checking {url}")
+                batch_results[url] = batch_pending[url].result(timeout=30)
+            except requests.exceptions.ConnectionError as error_msg:
+                if args.silent:
+                    print(f"  [!] Connection error for: {url}")
+                    if args.verbose:
+                        print(error_msg)
+            except TimeoutError:
+                if args.silent:
+                    print(f" [!] Timeout on {url}. Investigate if there are"
+                         " many of these")
+            except KeyboardInterrupt:
                 print("\nExiting...")
                 sys.exit()
-            if args.silent:
-                print(bcolors.OKBLUE,f"Connection refused for {mutation}")
-                status_code = 404
 
-        status_code = reply.status_code
+        for url in batch_results:
+            check = callback(batch_results[url])
+            if check == 'breakout':
+                return
+        tick['current'] += threads
+        sys.stdout.flush()
+        sys.stdout.write(Custom_colors.HEADER)
+        sys.stdout.write(f"  {tick['current']}/{tick['total']} completed...")
+        sys.stdout.write('\r')
+    sys.stdout.write('                            \r')
 
-        if status_code == 404:
-            pass
-        elif 'Bad Request' in reply.reason:
-            pass 
-        elif status_code == 200:
-            print_output(mutation, f"({status_code})", True)
-            buckets_found[mutation] = status_code
-        elif reply.status_code == 403:
-            if args.public:
-                print_output(mutation, f"({status_code})", False)
-            buckets_found[mutation] = status_code
-        elif 'Slow Down' in reply.reason:
-            print(bcolors.FAIL, "[*] You've been rate limited, exiting the program!")
-            sys.exit()
-        else:
-            buckets_found[mutation] = status_code
-            
-    return buckets_found
+
+def check_s3_buckets(all_mutations, threads):
+
+    if args.silent:
+        wordlist_length = len(all_mutations)
+        print(Custom_colors.WARNING,f"[*] Starting Enumeration | Target: {args.target} | Words loaded: {wordlist_length} | Threads: {args.threads}\n\n")
+    start_time = start_timer()
+
+    get_urls(all_mutations,
+                callback=print_s3_response,
+                threads=threads)
+
+    stop_timer(start_time)
+
 
 
 def start_timer():
@@ -130,20 +215,11 @@ def stop_timer(start_time):
     print("\n")
 
 def main():
-    words, lineCount = proccess_file()
-    start = start_timer()
-    bucket_names = args.file
-    target  = args.target
-    if args.silent:
-        print(bcolors.WARNING,f"[*] Starting Enumeration | Target: {target} | Words loaded: {lineCount} | Text file: {bucket_names}\n\n")
+    words = proccess_file()
+    target = args.target
     all_mutations = create_mutations(words, target)
-    results = check_for_buckets(all_mutations)
-    print(results)
-    json_data = json.dumps(results)
-    print("\n\n\n\n")
-    print(json_data)
-    stop_timer(start)
-    print(bcolors.WARNING, f"[*] Enumeration of {args.target} S3 buckets completed.")
+    check_s3_buckets(all_mutations, args.threads)
+    print(Custom_colors.WARNING, f"[*] Enumeration of {args.target} S3 buckets completed.")
 
 
 if __name__ == "__main__":
