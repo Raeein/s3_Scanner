@@ -27,12 +27,12 @@ class Custom_colors:
 
 parser = ArgumentParser()
 parser.add_argument("-t", "--target",
-                    help="Select a target stem name (e.g. 'shopify')", required="True")
-parser.add_argument("-f", "--file",
+                    help="Select target(s) stem name (e.g. 'shopify')", required="True")
+parser.add_argument("-w", "--wordlist",
                     help="Select the wordlist file to use (default: bucket-names.txt)", default="bucket-names.txt")
 parser.add_argument("-o", "--output",
                     help="Select output file to use (default: output_\'target\'.txt)", default="default.txt")
-parser.add_argument("-th", "--threads",
+parser.add_argument("-T", "--threads",
                     help="Number of threads (default: 5)", default=5, type=int)
 parser.add_argument("-v", "--verbose", action='store_true',
                     help="Prints out everything - use this flag for debugging preferably",)
@@ -57,26 +57,27 @@ if args.silent:
 
 
 def proccess_file():
-    with open(args.file, 'r') as file:
+    with open(args.wordlist, 'r') as file:
         words = file.read().splitlines()
     if len(words) == 0:
-        print("Empty text file, Exiting...")
+        print("Empty text wordlist, Exiting...")
         sys.exit()
     return words
 
-def create_mutations(words, target):
+def create_mutations(words, targets):
     all_mutations = []
-    for word in words:
-        all_mutations.extend([
-            f"http://{target}-{word}.s3.amazonaws.com",
-            f"http://{target}.{word}.s3.amazonaws.com",
-            f"http://{word}-{target}.s3.amazonaws.com",
-            f"http://{word}.{target}.s3.amazonaws.com",
-            f"http://s3.amazonaws.com/{target}-{word}/",
-            f"http://s3.amazonaws.com/{target}.{word}/",
-            f"http://s3.amazonaws.com/{word}-{target}/",
-            f"http://s3.amazonaws.com/{word}.{target}/"
-        ])
+    for target in targets:
+        for word in words:
+            all_mutations.extend([
+                f"http://{target}-{word}.s3.amazonaws.com",
+                f"http://{target}.{word}.s3.amazonaws.com",
+                f"http://{word}-{target}.s3.amazonaws.com",
+                f"http://{word}.{target}.s3.amazonaws.com",
+                f"http://s3.amazonaws.com/{target}-{word}/",
+                f"http://s3.amazonaws.com/{target}.{word}/",
+                f"http://s3.amazonaws.com/{word}-{target}/",
+                f"http://s3.amazonaws.com/{word}.{target}/"
+            ])
     return all_mutations
 
 def fmt_output(data):
@@ -96,7 +97,7 @@ def fmt_output(data):
     output_file = args.output
 
     if output_file == "default.txt":
-        target = args.target.replace("/", "_")
+        target = args.target.split(',')[0].replace("/", "_")
         output_file = f"output_{target}.txt"
 
     with open(output_file, 'a', encoding='utf-8') as log_writer:
@@ -140,7 +141,6 @@ def get_urls(all_mutations, threads=5, callback=''):
     tick = {}
     tick['total'] = len(all_mutations)
     tick['current'] = 0
-    buckets_found = {}
     queue = [all_mutations[x:x+threads] for x in range(0, len(all_mutations), threads)]
 
 
@@ -164,7 +164,7 @@ def get_urls(all_mutations, threads=5, callback=''):
                         print(error_msg)
             except TimeoutError:
                 if args.silent:
-                    print(f" [!] Timeout on {url}. Investigate if there are"
+                    print(f"  [!] Timeout on {url}. Investigate if there are"
                          " many of these")
             except KeyboardInterrupt:
                 print("\nExiting...")
@@ -186,7 +186,7 @@ def check_s3_buckets(all_mutations, threads):
 
     if args.silent:
         wordlist_length = len(all_mutations)
-        print(Custom_colors.WARNING,f"[*] Starting Enumeration | Target: {args.target} | Total mutations: {wordlist_length} | Threads: {args.threads}\n\n")
+        print(Custom_colors.WARNING,f"  [*] Starting Enumeration | Target: {args.target} | Total mutations: {wordlist_length} | Threads: {args.threads}\n\n")
     start_time = start_timer()
 
     get_urls(all_mutations,
@@ -214,7 +214,7 @@ def stop_timer(start_time):
 
 def main():
     words = proccess_file()
-    target = args.target
+    target = args.target.split(",")
     all_mutations = create_mutations(words, target)
     check_s3_buckets(all_mutations, args.threads)
     print(Custom_colors.WARNING, f"[*] Enumeration of {args.target} S3 buckets completed.")
